@@ -4,7 +4,6 @@ const express = require('express');
 const { Client, GatewayIntentBits } = require('discord.js');
 
 const app = express();
-
 app.use(express.json());
 
 const client = new Client({
@@ -15,9 +14,6 @@ const client = new Client({
 });
 
 const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.API_KEY;
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const GUILD_ID = process.env.GUILD_ID;
 
 client.once('ready', () => {
     console.log(`Bot online: ${client.user.tag}`);
@@ -30,11 +26,77 @@ app.get('/', (req, res) => {
     });
 });
 
+app.get('/discord/login', (req, res) => {
+    const usuarioId = req.query.id;
+
+    if (!usuarioId) {
+        return res.send('ID do usuário não informado.');
+    }
+
+    const params = new URLSearchParams({
+        client_id: process.env.CLIENT_ID,
+        redirect_uri: process.env.REDIRECT_URI,
+        response_type: 'code',
+        scope: 'identify',
+        state: usuarioId
+    });
+
+    res.redirect(`https://discord.com/oauth2/authorize?${params.toString()}`);
+});
+
+app.get('/discord/callback', async (req, res) => {
+    try {
+        const code = req.query.code;
+        const usuarioId = req.query.state;
+
+        if (!code || !usuarioId) {
+            return res.redirect(`${process.env.SITE_URL}/index.php`);
+        }
+
+        const tokenResponse = await fetch('https://discord.com/api/oauth2/token', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: new URLSearchParams({
+                client_id: process.env.CLIENT_ID,
+                client_secret: process.env.CLIENT_SECRET,
+                grant_type: 'authorization_code',
+                code,
+                redirect_uri: process.env.REDIRECT_URI
+            })
+        });
+
+        const tokenData = await tokenResponse.json();
+
+        if (!tokenData.access_token) {
+            console.log(tokenData);
+            return res.send('Erro ao conectar com o Discord.');
+        }
+
+        const userResponse = await fetch('https://discord.com/api/users/@me', {
+            headers: {
+                Authorization: `Bearer ${tokenData.access_token}`
+            }
+        });
+
+        const discordUser = await userResponse.json();
+
+        return res.redirect(
+            `${process.env.SITE_URL}/discord-retorno.php?key=${process.env.API_KEY}&id=${usuarioId}&discord_id=${discordUser.id}&discord_nome=${encodeURIComponent(discordUser.username)}`
+        );
+
+    } catch (error) {
+        console.log(error);
+        return res.send('Erro interno no callback.');
+    }
+});
+
 app.post('/alterar-apelido', async (req, res) => {
     try {
         const key = req.headers['x-api-key'];
 
-        if (!key || key !== API_KEY) {
+        if (!key || key !== process.env.API_KEY) {
             return res.status(401).json({
                 status: false,
                 message: 'Acesso negado'
@@ -50,7 +112,7 @@ app.post('/alterar-apelido', async (req, res) => {
             });
         }
 
-        const guild = await client.guilds.fetch(GUILD_ID);
+        const guild = await client.guilds.fetch(process.env.GUILD_ID);
         const member = await guild.members.fetch(discord_id);
 
         await member.setNickname(apelido);
@@ -63,7 +125,7 @@ app.post('/alterar-apelido', async (req, res) => {
         });
 
     } catch (error) {
-        console.error(error);
+        console.log(error);
 
         return res.status(500).json({
             status: false,
@@ -73,7 +135,7 @@ app.post('/alterar-apelido', async (req, res) => {
     }
 });
 
-client.login(BOT_TOKEN);
+client.login(process.env.BOT_TOKEN);
 
 app.listen(PORT, () => {
     console.log(`API rodando na porta ${PORT}`);
